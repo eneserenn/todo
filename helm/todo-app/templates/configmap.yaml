@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "todo-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "todo-app.labels" . | nindent 4 }}
+data:
+  NODE_ENV: "production"
+  NEXT_TELEMETRY_DISABLED: "1"
+  NEXTAUTH_URL: {{ .Values.app.nextauthUrl | quote }}
+  LOCAL_LLM_URL: {{ .Values.app.localLlmUrl | quote }}
+  {{- if .Values.app.localLlmModel }}
+  LOCAL_LLM_MODEL: {{ .Values.app.localLlmModel | quote }}
+  {{- end }}

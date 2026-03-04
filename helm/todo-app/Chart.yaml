@@ -1,0 +1,13 @@
+apiVersion: v2
+name: todo-app
+description: Next.js Todo Application with Prisma, NextAuth and AI features
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - nextjs
+  - todo
+  - prisma
+  - openshift
+maintainers:
+  - name: todo-app-team

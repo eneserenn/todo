@@ -1,0 +1,37 @@
+🚀 todo-app deployed successfully!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Release : {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{{- if .Values.route.enabled }}
+🌐 Application URL:
+   oc get route {{ include "todo-app.fullname" . }} -n {{ .Release.Namespace }} \
+     -o jsonpath='{.spec.host}'
+
+   → https://{{ if .Values.route.host }}{{ .Values.route.host }}{{ else }}<auto-assigned>.apps.<cluster>{{ end }}
+{{- end }}
+
+📋 Useful commands:
+
+   # Check pod status
+   oc get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+   # View application logs
+   oc logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "todo-app.name" . }} -f
+
+   # Run DB migration manually (if needed)
+   oc exec -n {{ .Release.Namespace }} deploy/{{ include "todo-app.fullname" . }} \
+     -- node node_modules/prisma/build/index.js db push --skip-generate
+
+   # Upgrade release
+   helm upgrade {{ .Release.Name }} ./helm/todo-app \
+     -n {{ .Release.Namespace }} \
+     --reuse-values \
+     --set image.tag=<new-tag>
+
+⚠️  Before going to production, make sure you have set:
+   - app.nextauthSecret  (openssl rand -base64 32)
+   - app.nextauthUrl     (your actual Route host)
+   - postgresql.password (strong password)

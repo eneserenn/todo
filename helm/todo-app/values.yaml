@@ -1,0 +1,99 @@
+# ── Application Image ──────────────────────────────────────────────────────
+image:
+  repository: your-registry.example.com/todo-app
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Image pull secret name (leave empty if registry is public or already configured)
+imagePullSecrets: []
+# - name: my-registry-secret
+
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+# ── Application Config ────────────────────────────────────────────────────
+app:
+  port: 3000
+
+  # NextAuth - REQUIRED: change these before deploying
+  nextauthUrl: "https://todo-app.apps.your-cluster.example.com"
+  # Generate with: openssl rand -base64 32
+  nextauthSecret: "CHANGE_ME_USE_A_STRONG_SECRET_AT_LEAST_32_CHARS"
+
+  # Local/external LLM endpoint (Ollama, LM Studio, OpenAI-compatible)
+  localLlmUrl: "http://ollama:11434/v1"
+  localLlmModel: ""     # leave empty to use DB setting
+  localLlmApiKey: ""    # leave empty if not required
+
+# ── PostgreSQL ────────────────────────────────────────────────────────────
+postgresql:
+  # Set to false to use an external database (set externalUrl instead)
+  enabled: true
+
+  # Internal PostgreSQL settings (used when enabled: true)
+  database: tododb
+  user: postgres
+  password: "CHANGE_ME_POSTGRES_PASSWORD"
+
+  storage: 5Gi
+  storageClass: ""   # leave empty for cluster default
+
+  # Used when enabled: false — provide full DSN
+  # externalUrl: "postgresql://user:password@host:5432/dbname"
+
+# ── OpenShift Route ───────────────────────────────────────────────────────
+route:
+  enabled: true
+  # Leave empty to let OpenShift auto-assign: <name>-<namespace>.apps.<cluster>
+  host: ""
+  tls:
+    enabled: true
+    termination: edge                # edge | passthrough | reencrypt
+    insecureEdgeTerminationPolicy: Redirect
+
+# ── Resources ─────────────────────────────────────────────────────────────
+resources:
+  app:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+  db:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+# ── Probes ────────────────────────────────────────────────────────────────
+livenessProbe:
+  httpGet:
+    path: /api/health
+    port: 3000
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /api/health
+    port: 3000
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  failureThreshold: 3
+
+# ── Service Account ───────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ── Node Scheduling ───────────────────────────────────────────────────────
+nodeSelector: {}
+tolerations: []
+affinity: {}

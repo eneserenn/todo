@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "todo-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "todo-app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "todo-app.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "todo-app.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "todo-app.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      # OpenShift restricted-v2 SCC compatible pod security context
+      securityContext:
+        {{- include "todo-app.podSecurityContext" . | nindent 8 }}
+
+      # ── Init container: run DB migrations ─────────────────────────────
+      initContainers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - node node_modules/prisma/build/index.js db push --skip-generate
+          securityContext:
+            {{- include "todo-app.securityContext" . | nindent 12 }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "todo-app.fullname" . }}
+                  key: DATABASE_URL
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+
+      # ── Application container ─────────────────────────────────────────
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          securityContext:
+            {{- include "todo-app.securityContext" . | nindent 12 }}
+
+          ports:
+            - name: http
+              containerPort: {{ .Values.app.port }}
+              protocol: TCP
+
+          envFrom:
+            - configMapRef:
+                name: {{ include "todo-app.fullname" . }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "todo-app.fullname" . }}
+                  key: DATABASE_URL
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "todo-app.fullname" . }}
+                  key: NEXTAUTH_SECRET
+            {{- if .Values.app.localLlmApiKey }}
+            - name: LOCAL_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "todo-app.fullname" . }}
+                  key: LOCAL_LLM_API_KEY
+            {{- end }}
+
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+
+          resources:
+            {{- toYaml .Values.resources.app | nindent 12 }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

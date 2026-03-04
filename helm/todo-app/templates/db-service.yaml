@@ -1,0 +1,19 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "todo-app.dbFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "todo-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+      protocol: TCP
+  selector:
+    {{- include "todo-app.dbSelectorLabels" . | nindent 4 }}
+{{- end }}

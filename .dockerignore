@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+.next
+.git
+.env
+.env.local
+.env*.local
+Dockerfile.dev
+docker-compose*.yml
+test-results
+e2e
+src/__tests__
+coverage
+*.md
+.github
+vitest.config.ts
+playwright.config.ts

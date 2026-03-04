@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model User {
+  id            String    @id @default(uuid())
+  name          String
+  email         String    @unique
+  password      String
+
+  role          Role      @default(EMPLOYEE)
+
+  // For employees to reference their manager
+  managerId     String?
+  manager       User?     @relation("ManagerToEmployee", fields: [managerId], references: [id])
+  employees     User[]    @relation("ManagerToEmployee")
+
+  // Tasks created by this user (typically a manager creating pool tasks)
+  createdTasks  Task[]    @relation("CreatedTasks")
+
+  // Tasks assigned to this user (from manager or self)
+  assignedTasks Task[]    @relation("AssignedTasks")
+
+  // User Groups
+  memberGroups   UserGroup[]    @relation("GroupMembers")
+  managedGroups  UserGroup[]    @relation("GroupManagers")
+
+  createdTemplates TaskTemplate[] @relation("CreatedTemplates")
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Task {
+  id          String    @id @default(uuid())
+  title       String
+  description String?   @db.Text
+  date        DateTime  // The date this task belongs to
+
+  isCompleted    Boolean   @default(false)
+  isPoolTask     Boolean   @default(false)
+  isPersonalPool Boolean   @default(false)
+  priority       Priority  @default(MEDIUM)
+  sortOrder      Int       @default(0)
+
+  // Recurrence
+  recurrence     String?   // "daily", "weekly", "weekdays", or null
+  recurrenceDay  Int?      // 0=Sun, 1=Mon ... 6=Sat (for weekly)
+
+  createdById String
+  createdBy   User      @relation("CreatedTasks", fields: [createdById], references: [id])
+
+  assignedToId String?
+  assignedTo   User?    @relation("AssignedTasks", fields: [assignedToId], references: [id])
+
+  subtasks    Subtask[]
+  comments    Comment[]
+  tags        Tag[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Subtask {
+  id          String   @id @default(uuid())
+  title       String
+  description String?  @db.Text
+  isCompleted Boolean  @default(false)
+
+  taskId      String
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Tag {
+  id        String   @id @default(uuid())
+  name      String
+  color     String   @default("#6366f1") // indigo default
+  userId    String
+  tasks     Task[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([name, userId])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  content   String   @db.Text
+  authorId  String
+  authorName String
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+}
+
+model AiPrompt {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  content     String   @db.Text
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Setting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String   @db.Text
+  label     String
+  group     String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model UserGroup {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?  @db.Text
+  color       String   @default("#6366f1")
+
+  members     User[]   @relation("GroupMembers")
+  managers    User[]   @relation("GroupManagers")
+  templates   TaskTemplate[] @relation("TemplateGroups")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model TaskTemplate {
+  id          String            @id @default(uuid())
+  name        String
+  description String?           @db.Text
+  createdById String
+  createdBy   User              @relation("CreatedTemplates", fields: [createdById], references: [id])
+  subtasks    SubtaskTemplate[]
+  groups      UserGroup[]       @relation("TemplateGroups")
+
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+model SubtaskTemplate {
+  id          String       @id @default(uuid())
+  title       String
+  description String?      @db.Text
+  sortOrder   Int          @default(0)
+
+  templateId  String
+  template    TaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime     @default(now())
+}
