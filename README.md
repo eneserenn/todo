@@ -106,6 +106,276 @@ Yapay zeka destekli, yönetici-çalışan rollerine sahip tam kapsamlı bir gör
    npm run dev
    ```
 
+## Helm Chart ile OpenShift Deployment
+
+### Gereksinimler
+
+- [Helm 3+](https://helm.sh/docs/intro/install/)
+- OpenShift CLI (`oc`) veya `kubectl`
+- OpenShift 4.x kümesi
+- Uygulamanın Docker imajı için erişilebilir bir container registry (örn. Quay.io, Docker Hub, OpenShift Internal Registry)
+
+---
+
+### 1. Docker İmajını Build ve Push Etme
+
+```bash
+# İmajı build edin
+docker build -t your-registry.example.com/todo-app:latest .
+
+# Registry'e push edin
+docker push your-registry.example.com/todo-app:latest
+```
+
+OpenShift Internal Registry kullanıyorsanız:
+
+```bash
+# OpenShift'e giriş yapın
+oc login --token=<token> --server=https://api.your-cluster.example.com:6443
+
+# Internal registry adresini alın
+REGISTRY=$(oc get route default-route -n openshift-image-registry --template='{{ .spec.host }}')
+
+# Registry'e giriş yapın
+docker login -u $(oc whoami) -p $(oc whoami --show-token) $REGISTRY
+
+# İmajı tag'leyin ve push edin
+docker tag todo-app:latest $REGISTRY/<namespace>/todo-app:latest
+docker push $REGISTRY/<namespace>/todo-app:latest
+```
+
+---
+
+### 2. Namespace / Project Oluşturma
+
+```bash
+# Yeni bir OpenShift projesi oluşturun
+oc new-project todo-app-prod
+
+# ya da mevcut projeye geçin
+oc project todo-app-prod
+```
+
+---
+
+### 3. `values.yaml` Dosyasını Özelleştirme
+
+`helm/todo-app/values.yaml` dosyasını kendi ortamınıza göre düzenleyin:
+
+```yaml
+# İmaj adresi (kendi registry'inizi yazın)
+image:
+  repository: your-registry.example.com/todo-app
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+app:
+  port: 3000
+
+  # Kümenizin gerçek route adresi
+  nextauthUrl: "https://todo-app.apps.your-cluster.example.com"
+
+  # Güçlü bir secret üretin: openssl rand -base64 32
+  nextauthSecret: "CHANGE_ME_USE_A_STRONG_SECRET_AT_LEAST_32_CHARS"
+
+  # Varsa Ollama / LLM servis adresi
+  localLlmUrl: "http://ollama:11434/v1"
+
+postgresql:
+  enabled: true          # false yaparak harici DB kullanabilirsiniz
+  database: tododb
+  user: postgres
+  password: "CHANGE_ME_POSTGRES_PASSWORD"
+  storage: 5Gi
+  storageClass: ""       # Boş bırakırsanız cluster default kullanılır
+
+route:
+  enabled: true
+  host: ""               # Boş bırakırsanız OpenShift otomatik atar
+  tls:
+    enabled: true
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+```
+
+> **Güvenlik notu:** `nextauthSecret` ve `postgresql.password` değerlerini asla varsayılan haliyle bırakmayın. Üretim ortamında `--set` flag'i veya ayrı bir `secrets.yaml` dosyası kullanın.
+
+---
+
+### 4. Private Registry için Image Pull Secret Oluşturma
+
+Registry'niz özel ise OpenShift'e kimlik bilgisi tanımlayın:
+
+```bash
+# Docker Hub / Quay.io için
+oc create secret docker-registry registry-secret \
+  --docker-server=your-registry.example.com \
+  --docker-username=<kullanici> \
+  --docker-password=<sifre> \
+  --docker-email=<email>
+
+# values.yaml içinde secret adını belirtin
+# imagePullSecrets:
+#   - name: registry-secret
+```
+
+---
+
+### 5. Helm ile Deploy Etme
+
+```bash
+# Helm chart'ı doğrulayın (dry-run)
+helm install todo-app ./helm/todo-app \
+  --namespace todo-app-prod \
+  --dry-run --debug
+
+# Gerçek kurulumu başlatın
+helm install todo-app ./helm/todo-app \
+  --namespace todo-app-prod \
+  --set image.repository=your-registry.example.com/todo-app \
+  --set image.tag=latest \
+  --set app.nextauthSecret=$(openssl rand -base64 32) \
+  --set postgresql.password=guclu-bir-sifre
+```
+
+Hassas değerleri ayrı bir dosyada tutmak isterseniz:
+
+```bash
+# secrets-override.yaml (git'e eklemeyin!)
+cat > /tmp/secrets-override.yaml <<EOF
+app:
+  nextauthSecret: "$(openssl rand -base64 32)"
+  nextauthUrl: "https://todo-app.apps.your-cluster.example.com"
+postgresql:
+  password: "guclu-bir-sifre"
+image:
+  repository: your-registry.example.com/todo-app
+  tag: v1.2.3
+EOF
+
+helm install todo-app ./helm/todo-app \
+  --namespace todo-app-prod \
+  -f /tmp/secrets-override.yaml
+```
+
+---
+
+### 6. Deployment Durumunu Kontrol Etme
+
+```bash
+# Helm release durumu
+helm status todo-app -n todo-app-prod
+
+# Pod'ların durumu
+oc get pods -n todo-app-prod
+
+# Uygulama logları
+oc logs -f deployment/todo-app -n todo-app-prod
+
+# Init container (migrasyon) logları
+oc logs -f <pod-adi> -c migrate -n todo-app-prod
+
+# Oluşturulan Route (URL) adresini görün
+oc get route todo-app -n todo-app-prod
+```
+
+---
+
+### 7. Güncelleme (Helm Upgrade)
+
+```bash
+# İmaj tag'ini güncelleyerek yeniden deploy edin
+helm upgrade todo-app ./helm/todo-app \
+  --namespace todo-app-prod \
+  --reuse-values \
+  --set image.tag=v1.2.3
+
+# Tüm values ile birlikte upgrade
+helm upgrade todo-app ./helm/todo-app \
+  --namespace todo-app-prod \
+  -f /tmp/secrets-override.yaml
+```
+
+---
+
+### 8. Kaldırma
+
+```bash
+# Release'i kaldırın (PVC'ler silinmez)
+helm uninstall todo-app -n todo-app-prod
+
+# PostgreSQL verisini de silmek için PVC'yi manuel silin
+oc delete pvc -l app.kubernetes.io/instance=todo-app -n todo-app-prod
+```
+
+---
+
+### Helm Chart Yapısı
+
+```
+helm/todo-app/
+├── Chart.yaml              # Chart metadata (isim, versiyon)
+├── values.yaml             # Varsayılan konfigürasyon değerleri
+└── templates/
+    ├── _helpers.tpl        # Yardımcı template fonksiyonları
+    ├── configmap.yaml      # NEXTAUTH_URL, LLM_URL gibi env değerleri
+    ├── secret.yaml         # DATABASE_URL, NEXTAUTH_SECRET (şifreli)
+    ├── deployment.yaml     # Uygulama Deployment (init container ile migrasyon)
+    ├── service.yaml        # ClusterIP Service
+    ├── route.yaml          # OpenShift Route (TLS desteğiyle)
+    ├── db-statefulset.yaml # PostgreSQL StatefulSet
+    ├── db-service.yaml     # PostgreSQL headless Service
+    ├── serviceaccount.yaml # ServiceAccount (restricted-v2 SCC uyumlu)
+    └── NOTES.txt           # Kurulum sonrası yardım mesajı
+```
+
+#### Önemli Özellikler
+
+| Özellik | Açıklama |
+|---------|----------|
+| **Init Container** | Her deploy'da `prisma db push` çalıştırarak DB şemasını otomatik günceller |
+| **OpenShift SCC** | `restricted-v2` SCC ile tam uyumlu pod security context |
+| **TLS Route** | Edge termination ile HTTPS trafiği otomatik yönetilir |
+| **Rolling Update** | `maxUnavailable: 0` ile sıfır kesintili güncelleme |
+| **Resource Limits** | CPU/bellek talep ve limitleri varsayılan olarak tanımlıdır |
+| **Harici DB Desteği** | `postgresql.enabled: false` + `postgresql.externalUrl` ile harici DB kullanılabilir |
+
+---
+
+### Harici PostgreSQL Kullanımı
+
+Kendi veritabanınızı kullanmak istiyorsanız:
+
+```yaml
+# values.yaml
+postgresql:
+  enabled: false
+  externalUrl: "postgresql://kullanici:sifre@db-host:5432/tododb"
+```
+
+---
+
+### Sorun Giderme
+
+```bash
+# Pod'un neden başlamadığını inceleyin
+oc describe pod <pod-adi> -n todo-app-prod
+
+# Tüm event'leri listeleyin
+oc get events -n todo-app-prod --sort-by='.lastTimestamp'
+
+# Secret ve ConfigMap içeriklerini kontrol edin
+oc get secret todo-app -n todo-app-prod -o yaml
+oc get configmap todo-app -n todo-app-prod -o yaml
+
+# Route'un doğru oluştuğunu doğrulayın
+oc describe route todo-app -n todo-app-prod
+```
+
+---
+
 ## Yapay Zeka Kurulumu (Opsiyonel)
 
 AI özelliklerini kullanmak için OpenAI API uyumlu bir yerel LLM sunucusu gereklidir.
