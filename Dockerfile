@@ -15,6 +15,11 @@ COPY . .
 RUN npx prisma generate
 
 ENV NEXT_TELEMETRY_DISABLED=1
+# Dummy build-time env vars so Next.js static analysis doesn't fail.
+# These are NOT embedded in the output — real values are injected at runtime.
+ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
+ENV NEXTAUTH_SECRET="build-time-secret-placeholder"
+ENV NEXTAUTH_URL="http://localhost:3000"
 RUN npm run build
 
 # ── Stage 3: Production runner ─────────────────────────────────────────────
